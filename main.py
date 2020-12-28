@@ -52,8 +52,6 @@ if __name__ == '__main__':
         if args["input"] is not None and frame is None:
             break
 
-        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-
         if writer is None and args["output"] is not None:
             output_path = os.path.join(args["output"], "vanilla.avi")
             (H, W) = frame.shape[:2]
@@ -61,7 +59,8 @@ if __name__ == '__main__':
             writer = cv2.VideoWriter(output_path, fourcc, 30, (W, H), True)
 
         if writer is not None:
-            writer.write(frame)
+            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            writer.write(rgb)
 
         if args["bottle_server"] is not None:
             with server.lock:
