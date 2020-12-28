@@ -1,6 +1,7 @@
 
 import cv2
 import time
+from datetime import datetime
 import os
 import argparse
 import threading
@@ -53,7 +54,10 @@ if __name__ == '__main__':
             break
 
         if writer is None and args["output"] is not None:
-            output_path = os.path.join(args["output"], "vanilla.avi")
+            timestamp = datetime.now().strftime("%Y%m%d_%H:%M:%S")
+            filename = "{}_vanilla.avi".format(timestamp)
+            output_path = os.path.join(args["output"], filename)
+
             (H, W) = frame.shape[:2]
             fourcc = cv2.VideoWriter_fourcc(*"MJPG")
             writer = cv2.VideoWriter(output_path, fourcc, 30, (W, H), True)
