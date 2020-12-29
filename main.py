@@ -5,7 +5,10 @@ from datetime import datetime
 import os
 import argparse
 import threading
-from imutils.video.videostream import  VideoStream
+
+from imutils.video.fps import FPS
+from imutils.video.videostream import VideoStream
+
 from utils import server
 from utils.gracefulkiller import GracefulKiller
 
@@ -20,11 +23,11 @@ if __name__ == '__main__':
                     help="use an rpi camera")
     ap.add_argument("-b", "--bottle-server", action="store_true",
                     help="enable a local bottle server to stream images")
-    ap.add_argument("-w", "--width", type=int, default=1920,
+    ap.add_argument("-w", "--width", type=int, default=3264,
                     help="Set stream resolution width")
-    ap.add_argument("--height", type=int, default=1080,
+    ap.add_argument("--height", type=int, default=2464,
                     help="Set stream resolution height")
-    ap.add_argument("-f", "--framerate", type=int, default=30,
+    ap.add_argument("-f", "--framerate", type=int, default=21,
                     help="Set stream resolution")
     args = vars(ap.parse_args())
 
@@ -40,8 +43,10 @@ if __name__ == '__main__':
         print("[INFO] starting video stream...")
         # vs = VideoStream(src=0).start()
         if args["use_pi_camera"]:
-            src_string = "nvarguscamerasrc ! video/x-raw(memory:NVMM), width=(int){}, height=(int){}, format=(string)NV12 ! nvvidconv ! video/x-raw, format=(string)BGRx ! videoconvert ! video/x-raw, format=(string)BGR ! appsink"
-            src = src_string.format(args["width"], args["height"])
+            src_string = "nvarguscamerasrc ! \
+                        video/x-raw(memory:NVMM), width=(int){}, height=(int){}, format=(string)NV12, framerate=(fraction){}/1 ! \
+                        nvvidconv ! video/x-raw, format=(string)BGRx ! videoconvert ! video/x-raw, format=(string)BGR ! appsink"
+            src = src_string.format(args["width"], args["height"], args["framerate"])
             print("SRC_STRING: {}".format(src))
             vs = VideoStream(src=src)
         else:
@@ -56,7 +61,9 @@ if __name__ == '__main__':
         vs = cv2.VideoCapture(args["input"])
 
     killer = GracefulKiller()
+    fps = FPS().start()
     while not killer.kill_now:
+
         frame = vs.read()
         frame = frame[1] if args["input"] is not None else frame
 
@@ -69,13 +76,13 @@ if __name__ == '__main__':
             timestamp = datetime.now().strftime("%Y%m%d_%H\%M\%S")
             filename = "{}_vanilla.mov".format(timestamp)
             output_path = os.path.join(args["output"], filename)
-            output_pipeline = 'appsrc ! video/x-raw, format=BGR ! queue ! videoconvert ! video/x-raw,format=BGRx ! nvvidconv ! omxh265enc ! matroskamux ! filesink location={}'
+            output_pipeline = 'appsrc ! video/x-raw, format=BGR ! queue ! videoconvert ! video/x-raw,format=BGRx ! nvvidconv ! omxh265enc MeasureEncoderLatency=1 ! matroskamux ! filesink location={}'
 
             (H, W) = frame.shape[:2]
             output_pipeline = output_pipeline.format(output_path)
             print("OUTPUT_PIPELINE: {}".format(output_pipeline))
             fourcc = cv2.VideoWriter_fourcc(*"HEVC")
-            writer = cv2.VideoWriter(output_pipeline, cv2.CAP_GSTREAMER, fourcc, 30, (W, H), True)
+            writer = cv2.VideoWriter(output_pipeline, cv2.CAP_GSTREAMER, fourcc, args["framerate"], (W, H), True)
             time.sleep(2)
             if not writer.isOpened():
                 print("Failed to open writer")
@@ -88,8 +95,20 @@ if __name__ == '__main__':
         if args["bottle_server"] is not None:
             with server.lock:
                 server.outputFrame = frame
+        fps.update()
+        if fps._numFrames % 100 is 0:
+            fps.stop()
+            print("[INFO] elasped time: {:.2f}".format(fps.elapsed()))
+            print("[INFO] approx. FPS: {:.2f}".format(fps.fps()))
+            fps = FPS().start()
 
+        # cv2.imshow("Stream", frame)
+        # if cv2.waitKey(1) == 113:
+        #     break
+
+    fps.stop()
     print("Shutting Down")
     vs.stop()
     if writer is not None:
         writer.release()
+    cv2.destroyAllWindows()
