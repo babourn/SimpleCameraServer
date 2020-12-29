@@ -28,7 +28,7 @@ def generate():
     with lock:
       if outputFrame is None:
         continue
-      (flag, encodedImage) = cv2.imencode(".jpg", cv2.cvtColor(outputFrame, cv2.COLOR_BGR2RGB))
+      (flag, encodedImage) = cv2.imencode(".jpg", outputFrame)
       if not flag:
         continue
     yield(b'--frame\r\n' b'Content-Type: image/jpeg\r\n\r\n' + bytearray(encodedImage) + b'\r\n')
