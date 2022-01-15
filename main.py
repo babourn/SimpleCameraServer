@@ -21,6 +21,8 @@ if __name__ == '__main__':
                     help="path to optional output video file")
     ap.add_argument("-u", "--use-pi-camera", action="store_true",
                     help="use an rpi camera")
+    ap.add_argument("-j", "--jetson", action="store_true",
+                    help= "use for a jetson camera")
     ap.add_argument("-b", "--bottle-server", action="store_true",
                     help="enable a local bottle server to stream images")
     ap.add_argument("-w", "--width", type=int, default=3264,
@@ -29,6 +31,8 @@ if __name__ == '__main__':
                     help="Set stream resolution height")
     ap.add_argument("-f", "--framerate", type=int, default=21,
                     help="Set stream resolution")
+    ap.add_argument("-d", "--display", action="store_true",
+                    help="display video to a screen for monitor viewing stream")
     args = vars(ap.parse_args())
 
     if args["bottle_server"] is not None:
@@ -42,16 +46,20 @@ if __name__ == '__main__':
     if args["input"] is None:
         print("[INFO] starting video stream...")
         # vs = VideoStream(src=0).start()
-        if args["use_pi_camera"]:
+        if args["jetson"]:
             src_string = "nvarguscamerasrc ! \
                         video/x-raw(memory:NVMM), width=(int){}, height=(int){}, format=(string)NV12, framerate=(fraction){}/1 ! \
                         nvvidconv ! video/x-raw, format=(string)BGRx ! videoconvert ! video/x-raw, format=(string)BGR ! appsink"
             src = src_string.format(args["width"], args["height"], args["framerate"])
             print("SRC_STRING: {}".format(src))
-            vs = VideoStream(src=src)
+            vs = VideoStream(src=src,
+                             resolution=(args["height"], args["width"]))
+        elif args["use_pi_camera"]:
+            vs = VideoStream(usePiCamera=False,
+                             resolution=(args["height"], args["width"]))
         else:
             vs = VideoStream(usePiCamera=False,
-                             resolution=(args["height"], args("width")))
+                             resolution=(args["height"], args["width"]))
         vs.start()
         time.sleep(2.0)
 
@@ -61,7 +69,7 @@ if __name__ == '__main__':
         vs = cv2.VideoCapture(args["input"])
 
     killer = GracefulKiller()
-    fps = FPS().start()
+    # fps = FPS().start()
     while not killer.kill_now:
 
         frame = vs.read()
@@ -74,15 +82,32 @@ if __name__ == '__main__':
 
         if writer is None and args["output"] is not None:
             timestamp = datetime.now().strftime("%Y%m%d_%H\%M\%S")
-            filename = "{}_vanilla.mov".format(timestamp)
-            output_path = os.path.join(args["output"], filename)
-            output_pipeline = 'appsrc ! video/x-raw, format=BGR ! queue ! videoconvert ! video/x-raw,format=BGRx ! nvvidconv ! omxh265enc MeasureEncoderLatency=1 ! matroskamux ! filesink location={}'
-
             (H, W) = frame.shape[:2]
-            output_pipeline = output_pipeline.format(output_path)
-            print("OUTPUT_PIPELINE: {}".format(output_pipeline))
-            fourcc = cv2.VideoWriter_fourcc(*"HEVC")
-            writer = cv2.VideoWriter(output_pipeline, cv2.CAP_GSTREAMER, fourcc, args["framerate"], (W, H), True)
+
+            if args["jetson"]:
+                filename = "{}_vanilla.hevc".format(timestamp)
+                output_path = os.path.join(args["output"], filename)
+                output_pipeline = 'appsrc ! video/x-raw, format=BGR ! queue ! videoconvert ! video/x-raw,format=BGRx ! nvvidconv ! omxh265enc MeasureEncoderLatency=1 ! matroskamux ! filesink location={}'
+
+                output_pipeline = output_pipeline.format(output_path)
+                print("OUTPUT_PIPELINE: {}".format(output_pipeline))
+                try:
+                    fourcc = cv2.VideoWriter_fourcc(*"HEVC")
+                    writer = cv2.VideoWriter(output_pipeline, cv2.CAP_GSTREAMER, fourcc, args["framerate"], (W, H), True)
+                except Exception as e:
+                    print(e)
+                    break
+            else:
+                filename = "{}_vanilla.avi".format(timestamp)
+                output_path = os.path.join(args["output"], filename)
+                try:
+                    fourcc = cv2.VideoWriter_fourcc(*"MJPG")
+                    writer = cv2.VideoWriter(output_path, fourcc, 30, (W, H),
+                                             True)
+                except Exception as e:
+                    print(e)
+                    break
+
             time.sleep(2)
             if not writer.isOpened():
                 print("Failed to open writer")
@@ -95,18 +120,20 @@ if __name__ == '__main__':
         if args["bottle_server"] is not None:
             with server.lock:
                 server.outputFrame = frame
-        fps.update()
-        if fps._numFrames % 100 is 0:
-            fps.stop()
-            print("[INFO] elasped time: {:.2f}".format(fps.elapsed()))
-            print("[INFO] approx. FPS: {:.2f}".format(fps.fps()))
-            fps = FPS().start()
+        # fps.update()
+        #
+        # if fps._numFrames % 100 is 0:
+        #     fps.stop()
+        #     print("[INFO] elasped time: {:.2f}".format(fps.elapsed()))
+        #     print("[INFO] approx. FPS: {:.2f}".format(fps.fps()))
+        #     fps = FPS().start()
 
-        # cv2.imshow("Stream", frame)
-        # if cv2.waitKey(1) == 113:
-        #     break
+        if args["display"]:
+            cv2.imshow("Stream", frame)
+            if cv2.waitKey(1) == 113:
+                break
 
-    fps.stop()
+    # fps.stop()
     print("Shutting Down")
     vs.stop()
     if writer is not None:
